@@ -28,50 +28,48 @@ jobs:
           ssh -o StrictHostKeyChecking=no $USER@$HOST << 'ENDSSH'
 
           set -e
+          echo "🚀 Starting Deployment..."
 
-          echo "Updating system..."
           sudo apt update -y
           sudo apt install -y python3 python3-pip python3-venv nginx git curl build-essential
 
-          echo "Installing Node.js..."
+          echo "📦 Installing Node..."
           curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
           sudo apt install -y nodejs
 
-          echo "Preparing project folder..."
+          echo "📁 Preparing project folder..."
           mkdir -p "$PROJECT_PATH"
           cd "$PROJECT_PATH"
 
-          # Clone or update repo
           if [ ! -d ".git" ]; then
             git clone https://github.com/rb14v1/promptlibrary.git .
           else
             git pull origin main
           fi
 
-          # ----- BACKEND (Django) -----
+          echo "🛠 Setting up backend..."
           cd backend
           python3 -m venv venv
           source venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
-
           python manage.py migrate --noinput
           python manage.py collectstatic --noinput
           deactivate
           cd ..
 
-          # ----- FRONTEND (React) -----
+          echo "⚛️ Building frontend..."
           cd frontend
           npm install
           npm run build
           cd ..
 
-          # Deploy React build
+          echo "📂 Copying frontend build to Nginx path..."
           sudo rm -rf /var/www/promptlibrary
           sudo mkdir -p /var/www/promptlibrary
           sudo cp -r frontend/dist/* /var/www/promptlibrary/
 
-          # ----- GUNICORN SERVICE -----
+          echo "🔥 Creating Gunicorn service..."
           sudo bash -c "cat > /etc/systemd/system/gunicorn.service" << 'EOF'
           [Unit]
           Description=Gunicorn for Django App
@@ -84,13 +82,13 @@ jobs:
 
           [Install]
           WantedBy=multi-user.target
-EOF
+          EOF
 
           sudo systemctl daemon-reload
           sudo systemctl restart gunicorn
           sudo systemctl enable gunicorn
 
-          # ----- NGINX CONFIG -----
+          echo "🌐 Configuring Nginx..."
           sudo bash -c "cat > /etc/nginx/sites-available/promptlibrary" << 'EOF'
           server {
               listen 80;
@@ -100,25 +98,24 @@ EOF
               index index.html;
 
               location / {
-                  try_files $uri $uri/ /index.html;
+                  try_files \$uri \$uri/ /index.html;
               }
 
               location /api/ {
                   proxy_pass http://unix:/run/gunicorn.sock;
-                  proxy_set_header Host $host;
-                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
               }
 
               location /static/ {
                   alias /home/ubuntu/promptlibrary/backend/static/;
               }
           }
-EOF
+          EOF
 
           sudo ln -sf /etc/nginx/sites-available/promptlibrary /etc/nginx/sites-enabled/
           sudo nginx -t
           sudo systemctl restart nginx
 
-          echo "🚀 DEPLOYMENT COMPLETED SUCCESSFULLY"
-
-ENDSSH
+          echo "🎉 DEPLOYMENT COMPLETED SUCCESSFULLY!"
+          ENDSSH
