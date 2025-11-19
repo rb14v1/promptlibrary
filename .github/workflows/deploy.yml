@@ -66,20 +66,20 @@ jobs:
           deactivate
           cd ..
 
-          # ----- Frontend (React/Vite) -----
-          cd frontend
-          npm ci
-          npm run build
-          cd ..
+# ----- Frontend (React/Vite) -----
+cd frontend
+npm ci
+npm run build
+cd ..
 
-          # copy frontend build to nginx webroot
-          sudo rm -rf /var/www/promptlibrary
-          sudo mkdir -p /var/www/promptlibrary
-          sudo cp -r frontend/dist/* /var/www/promptlibrary/
-          sudo chown -R www-data:www-data /var/www/promptlibrary
+# copy frontend build to nginx webroot
+sudo rm -rf /var/www/promptlibrary
+sudo mkdir -p /var/www/promptlibrary
+sudo cp -r frontend/dist/* /var/www/promptlibrary/
+sudo chown -R www-data:www-data /var/www/promptlibrary
 
-          # ----- Gunicorn systemd service -----
-          sudo tee /etc/systemd/system/gunicorn.service > /dev/null << SERVICE
+# ----- Gunicorn systemd service -----
+sudo tee /etc/systemd/system/gunicorn.service > /dev/null << 'SERVICE'
 [Unit]
 Description=gunicorn daemon for Django project
 After=network.target
