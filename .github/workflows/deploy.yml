@@ -1,17 +1,15 @@
-name: Deploy to EC2
+name: SSH Connectivity Test
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
-  deploy:
+  ssh-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 10
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Start ssh-agent and add private key
@@ -19,113 +17,11 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      - name: Deploy to EC2 (run remote commands)
+      - name: Run simple remote commands to test SSH
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_PROJECT_PATH: ${{ secrets.EC2_PROJECT_PATH }}
         run: |
-          ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" << 'EOF'
-
-          set -e
-
-          # update + install base packages
-          sudo apt update -y
-          sudo apt install -y python3-pip python3-venv nginx postgresql postgresql-contrib git curl build-essential
-
-          # node (for building frontend) - NodeSource (stable)
-          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-          sudo apt install -y nodejs
-
-          # create project dir
-          mkdir -p "$EC2_PROJECT_PATH"
-          cd "$EC2_PROJECT_PATH"
-
-          # clone or pull latest
-          if [ ! -d ".git" ]; then
-            git clone https://github.com/rb14v1/promptlibrary.git .
-          else
-            git fetch --all
-            git reset --hard origin/main
-          fi
-
-          # ensure correct ownership
-          sudo chown -R $USER:$USER "$EC2_PROJECT_PATH"
-
-          # ----- Backend (Django) -----
-          cd backend
-          python3 -m venv venv
-          source venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
-          # apply migrations & collect static
-          python manage.py migrate --noinput
-          python manage.py collectstatic --noinput
-
-          deactivate
-          cd ..
-
-# ----- Frontend (React/Vite) -----
-cd frontend
-npm ci
-npm run build
-cd ..
-
-# copy frontend build to nginx webroot
-sudo rm -rf /var/www/promptlibrary
-sudo mkdir -p /var/www/promptlibrary
-sudo cp -r frontend/dist/* /var/www/promptlibrary/
-sudo chown -R www-data:www-data /var/www/promptlibrary
-
-# ----- Gunicorn systemd service -----
-sudo tee /etc/systemd/system/gunicorn.service > /dev/null << 'SERVICE'
-[Unit]
-Description=gunicorn daemon for Django project
-After=network.target
-
-[Service]
-User=ec2-user
-Group=www-data
-WorkingDirectory=$EC2_PROJECT_PATH/backend
-ExecStart=$EC2_PROJECT_PATH/backend/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn.sock prompt_library.wsgi:application
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-
-          sudo systemctl daemon-reload
-          sudo systemctl enable --now gunicorn
-
-          # ----- Nginx site -----
-          sudo tee /etc/nginx/sites-available/promptlibrary > /dev/null << NGINX
-server {
-    listen 80;
-    server_name _;
-
-    root /var/www/promptlibrary;
-    index index.html;
-
-    location / {
-        try_files \$uri \$uri/ /index.html;
-    }
-
-    location /api/ {
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_pass http://unix:/run/gunicorn.sock;
-    }
-
-    location /static/ {
-        alias $EC2_PROJECT_PATH/backend/static/;
-    }
-}
-NGINX
-
-          sudo ln -sf /etc/nginx/sites-available/promptlibrary /etc/nginx/sites-enabled/promptlibrary
-          sudo rm -f /etc/nginx/sites-enabled/default || true
-          sudo nginx -t
-          sudo systemctl restart nginx
-
-          EOF
+          echo "Attempting SSH to $EC2_USER@$EC2_HOST ..."
+          ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "echo SSH_OK; uname -a; echo 'project path:' $EC2_PROJECT_PATH; ls -la $EC2_PROJECT_PATH || echo 'path-not-found';"
