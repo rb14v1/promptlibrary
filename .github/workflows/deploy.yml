@@ -72,7 +72,7 @@ jobs:
           sudo cp -r frontend/dist/* /var/www/promptlibrary/
 
           # ----- GUNICORN SERVICE -----
-          sudo bash -c "cat > /etc/systemd/system/gunicorn.service" << EOF
+          sudo bash -c "cat > /etc/systemd/system/gunicorn.service" << 'EOF'
 [Unit]
 Description=Gunicorn for Django App
 After=network.target
