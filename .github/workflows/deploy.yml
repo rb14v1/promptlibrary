@@ -72,20 +72,19 @@ jobs:
           sudo cp -r frontend/dist/* /var/www/promptlibrary/
 
           # ----- GUNICORN SERVICE -----
-          sudo bash -c "cat > /etc/systemd/system/gunicorn.service" << 'EOF'
-[Unit]
-Description=Gunicorn for Django App
-After=network.target
+         sudo bash -c "cat > /etc/systemd/system/gunicorn.service" << 'EOF'
+          [Unit]
+          Description=Gunicorn for Django App
+          After=network.target
 
-[Service]
-User=ubuntu
-WorkingDirectory=/home/ubuntu/promptlibrary/backend
-ExecStart=/home/ubuntu/promptlibrary/backend/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn.sock prompt_library.wsgi:application
+          [Service]
+          User=ubuntu
+          WorkingDirectory=/home/ubuntu/promptlibrary/backend
+          ExecStart=/home/ubuntu/promptlibrary/backend/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn.sock prompt_library.wsgi:application
 
-[Install]
-WantedBy=multi-user.target
+          [Install]
+          WantedBy=multi-user.target
 EOF
-
           sudo systemctl daemon-reload
           sudo systemctl restart gunicorn
           sudo systemctl enable gunicorn
