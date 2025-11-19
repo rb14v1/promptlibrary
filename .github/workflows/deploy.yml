@@ -20,8 +20,12 @@ jobs:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
       - name: Deploy to EC2 (run remote commands)
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_PROJECT_PATH: ${{ secrets.EC2_PROJECT_PATH }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << "EOF"
+          ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" << 'EOF'
 
           set -e
 
@@ -34,8 +38,8 @@ jobs:
           sudo apt install -y nodejs
 
           # create project dir
-          mkdir -p "${{ secrets.EC2_PROJECT_PATH }}"
-          cd "${{ secrets.EC2_PROJECT_PATH }}"
+          mkdir -p "$EC2_PROJECT_PATH"
+          cd "$EC2_PROJECT_PATH"
 
           # clone or pull latest
           if [ ! -d ".git" ]; then
@@ -46,7 +50,7 @@ jobs:
           fi
 
           # ensure correct ownership
-          sudo chown -R $USER:$USER "${{ secrets.EC2_PROJECT_PATH }}"
+          sudo chown -R $USER:$USER "$EC2_PROJECT_PATH"
 
           # ----- Backend (Django) -----
           cd backend
@@ -83,8 +87,8 @@ After=network.target
 [Service]
 User=ec2-user
 Group=www-data
-WorkingDirectory=${{ secrets.EC2_PROJECT_PATH }}/backend
-ExecStart=${{ secrets.EC2_PROJECT_PATH }}/backend/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn.sock prompt_library.wsgi:application
+WorkingDirectory=$EC2_PROJECT_PATH/backend
+ExecStart=$EC2_PROJECT_PATH/backend/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn.sock prompt_library.wsgi:application
 
 [Install]
 WantedBy=multi-user.target
@@ -114,7 +118,7 @@ server {
     }
 
     location /static/ {
-        alias ${{ secrets.EC2_PROJECT_PATH }}/backend/static/;
+        alias $EC2_PROJECT_PATH/backend/static/;
     }
 }
 NGINX
