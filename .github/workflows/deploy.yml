@@ -114,7 +114,7 @@ server {
     }
 
     location /static/ {
-        alias ${ { secrets.EC2_PROJECT_PATH } }/backend/static/;
+        alias ${{ secrets.EC2_PROJECT_PATH }}/backend/static/;
     }
 }
 NGINX
