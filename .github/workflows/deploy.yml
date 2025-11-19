@@ -24,6 +24,7 @@ jobs:
           USER: ${{ secrets.EC2_USER }}
           PROJECT_PATH: ${{ secrets.EC2_PROJECT_PATH }}
 
+
         run: |
           ssh -o StrictHostKeyChecking=no $USER@$HOST << 'ENDSSH'
           
