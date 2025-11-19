@@ -72,7 +72,7 @@ jobs:
           sudo cp -r frontend/dist/* /var/www/promptlibrary/
 
           # ----- GUNICORN SERVICE -----
-          sudo bash -c "cat > /etc/systemd/system/gunicorn.service" << 'EOF'
+          sudo bash -c 'cat > /etc/systemd/system/gunicorn.service' << EOF
 [Unit]
 Description=Gunicorn for Django App
 After=network.target
@@ -91,7 +91,7 @@ EOF
           sudo systemctl enable gunicorn
 
           # ----- NGINX CONFIG -----
-          sudo bash -c "cat > /etc/nginx/sites-available/promptlibrary" << 'EOF'
+          sudo bash -c 'cat > /etc/nginx/sites-available/promptlibrary' << EOF
 server {
     listen 80;
 
@@ -114,7 +114,7 @@ server {
 }
 EOF
 
-          sudo ln -sf /etc/nginx/sites-available/promptlibrary /etc/nginx/sites-enabled/
+          sudo ln -sf /etc/nginx/sites-available/promptlibrary /etc/nginx/sites-enabled/promptlibrary
           sudo nginx -t
           sudo systemctl restart nginx
 
