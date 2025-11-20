@@ -1,3 +1,8 @@
+- name: Debug secrets
+  run: |
+    echo "HOST=$HOST"
+    echo "USER=$USER"
+    echo "PROJECT_PATH=$PROJECT_PATH"
 name: Deploy to EC2 (SSH script)
 
 on:
@@ -27,7 +32,8 @@ jobs:
         run: |
           echo "🚀 Starting deployment to $USER@$HOST"
 
-          ssh -o StrictHostKeyChecking=no "$USER@$HOST" bash -s <<ENDSSH
+          ssh -vvv -o StrictHostKeyChecking=no "$USER@$HOST" bash -s <<ENDSSH
+
             set -e
 
             # Export project path
