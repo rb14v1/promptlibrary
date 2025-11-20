@@ -25,63 +25,64 @@ jobs:
           USER: ${{ secrets.EC2_USER }}
           PROJECT_PATH: ${{ secrets.EC2_PROJECT_PATH }}
         run: |
-          # Note: PROJECT_PATH will be expanded here (on the runner) and injected into the remote environment.
-          ssh -o StrictHostKeyChecking=no "$USER@$HOST" "PROJECT_PATH='$PROJECT_PATH' bash -s" <<'ENDSSH'
+          echo "🚀 Starting deployment to $USER@$HOST"
 
-          set -e
-          echo "🚀 Remote: Starting deployment..."
+          ssh -o StrictHostKeyChecking=no "$USER@$HOST" bash -s <<ENDSSH
+            set -e
 
-          echo "Updating apt and installing base packages..."
-          sudo apt update -y
-          sudo apt install -y python3 python3-pip python3-venv nginx git curl build-essential
+            # Export project path
+            PROJECT_PATH="$PROJECT_PATH"
+            echo "📂 Project path: \$PROJECT_PATH"
 
-          echo "Installing Node.js (NodeSource)..."
-          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-          sudo apt install -y nodejs
+            echo "Updating apt and installing base packages..."
+            sudo apt update -y
+            sudo apt install -y python3 python3-pip python3-venv nginx git curl build-essential
 
-          echo "Preparing project folder: $PROJECT_PATH"
-          mkdir -p "$PROJECT_PATH"
-          cd "$PROJECT_PATH"
+            echo "Installing Node.js (NodeSource)..."
+            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+            sudo apt install -y nodejs
 
-          if [ ! -d ".git" ]; then
-            echo "Cloning repository..."
-            git clone https://github.com/rb14v1/promptlibrary.git .
-          else
-            echo "Pulling latest from origin/main..."
-            git fetch --all
-            git reset --hard origin/main
-          fi
+            echo "Preparing project folder..."
+            mkdir -p "\$PROJECT_PATH"
+            cd "\$PROJECT_PATH"
 
-          echo "=== Backend setup ==="
-          cd backend
-          # create venv if missing
-          if [ ! -d "venv" ]; then
-            python3 -m venv venv
-          fi
-          source venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt
+            if [ ! -d ".git" ]; then
+              echo "Cloning repository..."
+              git clone https://github.com/rb14v1/promptlibrary.git .
+            else
+              echo "Pulling latest from origin/main..."
+              git fetch --all
+              git reset --hard origin/main
+            fi
 
-          echo "Running migrations and collectstatic..."
-          python manage.py migrate --noinput
-          python manage.py collectstatic --noinput || true
-          deactivate
-          cd ..
+            echo "=== Backend setup ==="
+            cd backend
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
 
-          echo "=== Frontend build ==="
-          cd frontend
-          npm ci
-          npm run build
-          cd ..
+            echo "Running migrations and collectstatic..."
+            python manage.py migrate --noinput
+            python manage.py collectstatic --noinput || true
+            deactivate
+            cd ..
 
-          echo "Copying frontend build into nginx webroot..."
-          sudo rm -rf /var/www/promptlibrary
-          sudo mkdir -p /var/www/promptlibrary
-          # frontend build output from Vite is usually /frontend/dist or /frontend/build — adjust if your project uses a different folder
-          sudo cp -r frontend/dist/* /var/www/promptlibrary/ || true
+            echo "=== Frontend build ==="
+            cd frontend
+            npm ci
+            npm run build
+            cd ..
 
-          echo "Creating/updating Gunicorn systemd service..."
-          sudo bash -c "cat > /etc/systemd/system/gunicorn.service" <<'GUNI'
+            echo "Copying frontend build into nginx webroot..."
+            sudo rm -rf /var/www/promptlibrary
+            sudo mkdir -p /var/www/promptlibrary
+            sudo cp -r frontend/dist/* /var/www/promptlibrary/ || true
+
+            echo "Creating/updating Gunicorn systemd service..."
+            sudo bash -c "cat > /etc/systemd/system/gunicorn.service" <<'GUNI'
 [Unit]
 Description=Gunicorn for Django App
 After=network.target
@@ -96,11 +97,11 @@ ExecStart=$PROJECT_PATH/backend/venv/bin/gunicorn --workers 3 --bind unix:/run/g
 WantedBy=multi-user.target
 GUNI
 
-          sudo systemctl daemon-reload
-          sudo systemctl enable --now gunicorn || sudo systemctl restart gunicorn || true
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now gunicorn || sudo systemctl restart gunicorn || true
 
-          echo "Creating Nginx site..."
-          sudo bash -c "cat > /etc/nginx/sites-available/promptlibrary" <<'NGINX_CONF'
+            echo "Creating Nginx site..."
+            sudo bash -c "cat > /etc/nginx/sites-available/promptlibrary" <<'NGINX_CONF'
 server {
     listen 80;
     server_name _;
@@ -125,10 +126,10 @@ server {
 }
 NGINX_CONF
 
-          sudo ln -sf /etc/nginx/sites-available/promptlibrary /etc/nginx/sites-enabled/promptlibrary
-          sudo rm -f /etc/nginx/sites-enabled/default || true
-          sudo nginx -t
-          sudo systemctl restart nginx || true
+            sudo ln -sf /etc/nginx/sites-available/promptlibrary /etc/nginx/sites-enabled/promptlibrary
+            sudo rm -f /etc/nginx/sites-enabled/default || true
+            sudo nginx -t
+            sudo systemctl restart nginx || true
 
-          echo "🎉 REMOTE: Deployment finished successfully."
-          ENDSSH
+            echo "🎉 Deployment finished successfully on \$HOST!"
+ENDSSH
