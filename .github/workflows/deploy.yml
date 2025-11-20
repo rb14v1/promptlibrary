@@ -1,9 +1,8 @@
-
-name: Deploy to EC2 (SSH script)
+name: Deploy to EC2
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -15,49 +14,43 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Add SSH key
+      - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.7.0
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      - name: Deploy to EC2 via SSH
+      - name: Debug environment
+        run: |
+          echo "HOST=${{ secrets.EC2_HOST }}"
+          echo "USER=${{ secrets.EC2_USER }}"
+          echo "PROJECT_PATH=${{ secrets.EC2_PROJECT_PATH }}"
+
+      - name: Deploy to EC2
         env:
           HOST: ${{ secrets.EC2_HOST }}
           USER: ${{ secrets.EC2_USER }}
           PROJECT_PATH: ${{ secrets.EC2_PROJECT_PATH }}
         run: |
-          echo "🚀 Starting deployment to $USER@$HOST"
+          echo "🚀 Deploying to $USER@$HOST"
 
-          ssh -vvv -o StrictHostKeyChecking=no "$USER@$HOST" bash -s <<ENDSSH
-
+          ssh -o StrictHostKeyChecking=no "$USER@$HOST" bash -s <<'ENDSSH'
             set -e
 
-            # Export project path
-            PROJECT_PATH="$PROJECT_PATH"
-            echo "📂 Project path: \$PROJECT_PATH"
+            echo "Project path: $PROJECT_PATH"
+            mkdir -p "$PROJECT_PATH"
+            cd "$PROJECT_PATH"
 
-            echo "Updating apt and installing base packages..."
-            sudo apt update -y
-            sudo apt install -y python3 python3-pip python3-venv nginx git curl build-essential
-
-            echo "Installing Node.js (NodeSource)..."
-            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-            sudo apt install -y nodejs
-
-            echo "Preparing project folder..."
-            mkdir -p "\$PROJECT_PATH"
-            cd "\$PROJECT_PATH"
-
+            # Clone or pull repo
             if [ ! -d ".git" ]; then
               echo "Cloning repository..."
               git clone https://github.com/rb14v1/promptlibrary.git .
             else
-              echo "Pulling latest from origin/main..."
+              echo "Pulling latest changes..."
               git fetch --all
               git reset --hard origin/main
             fi
 
-            echo "=== Backend setup ==="
+            # Backend setup
             cd backend
             if [ ! -d "venv" ]; then
               python3 -m venv venv
@@ -65,25 +58,23 @@ jobs:
             source venv/bin/activate
             pip install --upgrade pip
             pip install -r requirements.txt
-
-            echo "Running migrations and collectstatic..."
             python manage.py migrate --noinput
             python manage.py collectstatic --noinput || true
             deactivate
             cd ..
 
-            echo "=== Frontend build ==="
+            # Frontend setup
             cd frontend
             npm ci
             npm run build
             cd ..
 
-            echo "Copying frontend build into nginx webroot..."
+            # Copy frontend build to Nginx webroot
             sudo rm -rf /var/www/promptlibrary
             sudo mkdir -p /var/www/promptlibrary
             sudo cp -r frontend/dist/* /var/www/promptlibrary/ || true
 
-            echo "Creating/updating Gunicorn systemd service..."
+            # Gunicorn systemd service
             sudo bash -c "cat > /etc/systemd/system/gunicorn.service" <<'GUNI'
 [Unit]
 Description=Gunicorn for Django App
@@ -102,7 +93,7 @@ GUNI
             sudo systemctl daemon-reload
             sudo systemctl enable --now gunicorn || sudo systemctl restart gunicorn || true
 
-            echo "Creating Nginx site..."
+            # Nginx setup
             sudo bash -c "cat > /etc/nginx/sites-available/promptlibrary" <<'NGINX_CONF'
 server {
     listen 80;
@@ -133,5 +124,5 @@ NGINX_CONF
             sudo nginx -t
             sudo systemctl restart nginx || true
 
-            echo "🎉 Deployment finished successfully on \$HOST!"
+            echo "🎉 Deployment finished successfully on $HOST!"
 ENDSSH
