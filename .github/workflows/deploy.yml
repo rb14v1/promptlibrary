@@ -1,0 +1,126 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Debug environment variables
+        run: |
+          echo "HOST=${{ secrets.EC2_HOST }}"
+          echo "USER=${{ secrets.EC2_USER }}"
+          echo "PROJECT_PATH=${{ secrets.EC2_PROJECT_PATH }}"
+
+      - name: Deploy to EC2
+        env:
+          HOST: ${{ secrets.EC2_HOST }}
+          USER: ${{ secrets.EC2_USER }}
+          PROJECT_PATH: ${{ secrets.EC2_PROJECT_PATH }}
+        run: |
+          echo "🚀 Deploying to $USER@$HOST"
+
+          ssh -o StrictHostKeyChecking=no "$USER@$HOST" bash -s <<'ENDSSH'
+            set -e
+
+            echo "Project path: $PROJECT_PATH"
+            mkdir -p "$PROJECT_PATH"
+            cd "$PROJECT_PATH"
+
+            # Clone or update repository
+            if [ ! -d ".git" ]; then
+              git clone https://github.com/rb14v1/promptlibrary.git .
+            else
+              git fetch --all
+              git reset --hard origin/main
+            fi
+
+            # Backend setup
+            cd backend
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            python manage.py migrate --noinput
+            python manage.py collectstatic --noinput || true
+            deactivate
+            cd ..
+
+            # Frontend build
+            cd frontend
+            npm ci
+            npm run build
+            cd ..
+
+            # Copy frontend build to Nginx webroot
+            sudo rm -rf /var/www/promptlibrary
+            sudo mkdir -p /var/www/promptlibrary
+            sudo cp -r frontend/dist/* /var/www/promptlibrary/ || true
+
+            # Gunicorn systemd service
+            sudo bash -c "cat > /etc/systemd/system/gunicorn.service" <<'GUNI'
+[Unit]
+Description=Gunicorn for Django App
+After=network.target
+
+[Service]
+User=ubuntu
+Group=www-data
+WorkingDirectory=$PROJECT_PATH/backend
+ExecStart=$PROJECT_PATH/backend/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn.sock prompt_library.wsgi:application
+
+[Install]
+WantedBy=multi-user.target
+GUNI
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now gunicorn || sudo systemctl restart gunicorn || true
+
+            # Nginx configuration
+            sudo bash -c "cat > /etc/nginx/sites-available/promptlibrary" <<'NGINX_CONF'
+server {
+    listen 80;
+    server_name _;
+
+    root /var/www/promptlibrary;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://unix:/run/gunicorn.sock;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location /static/ {
+        alias $PROJECT_PATH/backend/static/;
+    }
+}
+NGINX_CONF
+
+            sudo ln -sf /etc/nginx/sites-available/promptlibrary /etc/nginx/sites-enabled/promptlibrary
+            sudo rm -f /etc/nginx/sites-enabled/default || true
+            sudo nginx -t
+            sudo systemctl restart nginx || true
+
+            echo "🎉 Deployment finished successfully on $HOST!"
+ENDSSH
