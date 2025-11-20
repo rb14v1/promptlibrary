@@ -1,8 +1,4 @@
-- name: Debug secrets
-  run: |
-    echo "HOST=$HOST"
-    echo "USER=$USER"
-    echo "PROJECT_PATH=$PROJECT_PATH"
+
 name: Deploy to EC2 (SSH script)
 
 on:
