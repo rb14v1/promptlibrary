@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Start SSH agent
@@ -19,7 +19,7 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      - name: Debug environment
+      - name: Debug environment variables
         run: |
           echo "HOST=${{ secrets.EC2_HOST }}"
           echo "USER=${{ secrets.EC2_USER }}"
@@ -40,12 +40,10 @@ jobs:
             mkdir -p "$PROJECT_PATH"
             cd "$PROJECT_PATH"
 
-            # Clone or pull repo
+            # Clone or update repository
             if [ ! -d ".git" ]; then
-              echo "Cloning repository..."
               git clone https://github.com/rb14v1/promptlibrary.git .
             else
-              echo "Pulling latest changes..."
               git fetch --all
               git reset --hard origin/main
             fi
@@ -63,7 +61,7 @@ jobs:
             deactivate
             cd ..
 
-            # Frontend setup
+            # Frontend build
             cd frontend
             npm ci
             npm run build
@@ -93,7 +91,7 @@ GUNI
             sudo systemctl daemon-reload
             sudo systemctl enable --now gunicorn || sudo systemctl restart gunicorn || true
 
-            # Nginx setup
+            # Nginx configuration
             sudo bash -c "cat > /etc/nginx/sites-available/promptlibrary" <<'NGINX_CONF'
 server {
     listen 80;
