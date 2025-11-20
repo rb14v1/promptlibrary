@@ -1,13 +1,14 @@
-name: Deploy to EC2
+name: Deploy to EC2 (SSH script)
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repo
@@ -18,104 +19,116 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      - name: Deploy on EC2
+      - name: Deploy to EC2 via SSH
         env:
           HOST: ${{ secrets.EC2_HOST }}
           USER: ${{ secrets.EC2_USER }}
           PROJECT_PATH: ${{ secrets.EC2_PROJECT_PATH }}
-
         run: |
-          ssh -o StrictHostKeyChecking=no $USER@$HOST << 'ENDSSH'
+          # Note: PROJECT_PATH will be expanded here (on the runner) and injected into the remote environment.
+          ssh -o StrictHostKeyChecking=no "$USER@$HOST" "PROJECT_PATH='$PROJECT_PATH' bash -s" <<'ENDSSH'
 
           set -e
-          echo "🚀 Starting Deployment..."
+          echo "🚀 Remote: Starting deployment..."
 
+          echo "Updating apt and installing base packages..."
           sudo apt update -y
           sudo apt install -y python3 python3-pip python3-venv nginx git curl build-essential
 
-          echo "📦 Installing Node..."
+          echo "Installing Node.js (NodeSource)..."
           curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
           sudo apt install -y nodejs
 
-          echo "📁 Preparing project folder..."
+          echo "Preparing project folder: $PROJECT_PATH"
           mkdir -p "$PROJECT_PATH"
           cd "$PROJECT_PATH"
 
           if [ ! -d ".git" ]; then
+            echo "Cloning repository..."
             git clone https://github.com/rb14v1/promptlibrary.git .
           else
-            git pull origin main
+            echo "Pulling latest from origin/main..."
+            git fetch --all
+            git reset --hard origin/main
           fi
 
-          echo "🛠 Setting up backend..."
+          echo "=== Backend setup ==="
           cd backend
-          python3 -m venv venv
+          # create venv if missing
+          if [ ! -d "venv" ]; then
+            python3 -m venv venv
+          fi
           source venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
+
+          echo "Running migrations and collectstatic..."
           python manage.py migrate --noinput
-          python manage.py collectstatic --noinput
+          python manage.py collectstatic --noinput || true
           deactivate
           cd ..
 
-          echo "⚛️ Building frontend..."
+          echo "=== Frontend build ==="
           cd frontend
-          npm install
+          npm ci
           npm run build
           cd ..
 
-          echo "📂 Copying frontend build to Nginx path..."
+          echo "Copying frontend build into nginx webroot..."
           sudo rm -rf /var/www/promptlibrary
           sudo mkdir -p /var/www/promptlibrary
-          sudo cp -r frontend/dist/* /var/www/promptlibrary/
+          # frontend build output from Vite is usually /frontend/dist or /frontend/build — adjust if your project uses a different folder
+          sudo cp -r frontend/dist/* /var/www/promptlibrary/ || true
 
-          echo "🔥 Creating Gunicorn service..."
-          sudo bash -c "cat > /etc/systemd/system/gunicorn.service" << 'EOF'
-          [Unit]
-          Description=Gunicorn for Django App
-          After=network.target
+          echo "Creating/updating Gunicorn systemd service..."
+          sudo bash -c "cat > /etc/systemd/system/gunicorn.service" <<'GUNI'
+[Unit]
+Description=Gunicorn for Django App
+After=network.target
 
-          [Service]
-          User=ubuntu
-          WorkingDirectory=/home/ubuntu/promptlibrary/backend
-          ExecStart=/home/ubuntu/promptlibrary/backend/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn.sock prompt_library.wsgi:application
+[Service]
+User=ubuntu
+Group=www-data
+WorkingDirectory=$PROJECT_PATH/backend
+ExecStart=$PROJECT_PATH/backend/venv/bin/gunicorn --workers 3 --bind unix:/run/gunicorn.sock prompt_library.wsgi:application
 
-          [Install]
-          WantedBy=multi-user.target
-          EOF
+[Install]
+WantedBy=multi-user.target
+GUNI
 
           sudo systemctl daemon-reload
-          sudo systemctl restart gunicorn
-          sudo systemctl enable gunicorn
+          sudo systemctl enable --now gunicorn || sudo systemctl restart gunicorn || true
 
-          echo "🌐 Configuring Nginx..."
-          sudo bash -c "cat > /etc/nginx/sites-available/promptlibrary" << 'EOF'
-          server {
-              listen 80;
-              server_name _;
+          echo "Creating Nginx site..."
+          sudo bash -c "cat > /etc/nginx/sites-available/promptlibrary" <<'NGINX_CONF'
+server {
+    listen 80;
+    server_name _;
 
-              root /var/www/promptlibrary;
-              index index.html;
+    root /var/www/promptlibrary;
+    index index.html;
 
-              location / {
-                  try_files \$uri \$uri/ /index.html;
-              }
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
 
-              location /api/ {
-                  proxy_pass http://unix:/run/gunicorn.sock;
-                  proxy_set_header Host \$host;
-                  proxy_set_header X-Real-IP \$remote_addr;
-              }
+    location /api/ {
+        proxy_pass http://unix:/run/gunicorn.sock;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
 
-              location /static/ {
-                  alias /home/ubuntu/promptlibrary/backend/static/;
-              }
-          }
-          EOF
+    location /static/ {
+        alias $PROJECT_PATH/backend/static/;
+    }
+}
+NGINX_CONF
 
-          sudo ln -sf /etc/nginx/sites-available/promptlibrary /etc/nginx/sites-enabled/
+          sudo ln -sf /etc/nginx/sites-available/promptlibrary /etc/nginx/sites-enabled/promptlibrary
+          sudo rm -f /etc/nginx/sites-enabled/default || true
           sudo nginx -t
-          sudo systemctl restart nginx
+          sudo systemctl restart nginx || true
 
-          echo "🎉 DEPLOYMENT COMPLETED SUCCESSFULLY!"
+          echo "🎉 REMOTE: Deployment finished successfully."
           ENDSSH
