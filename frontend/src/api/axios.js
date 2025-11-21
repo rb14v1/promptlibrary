@@ -2,7 +2,7 @@
 import axios from 'axios';
 
 // Your Django backend URL
-const baseURL = 'http://50.17.86.95/api';
+const baseURL = '/api';
 
 const api = axios.create({
   baseURL: baseURL,
